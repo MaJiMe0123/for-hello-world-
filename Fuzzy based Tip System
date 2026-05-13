@@ -1,0 +1,279 @@
+import sys
+import numpy as np
+import skfuzzy as fuzz
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QDoubleSpinBox, QPushButton,
+                             QTabWidget, QGroupBox, QComboBox, QScrollArea, QGridLayout, QFrame)
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon 
+
+
+COLOR_BG = "#1E1E2E"
+COLOR_CARD = "#2B2B3B"
+COLOR_ACCENT = "#89B4FA"
+COLOR_TEXT = "#CDD6F4"
+COLOR_SUCCESS = "#A6E3A1"
+COLOR_DARK_TEXT = "#11111B"
+
+
+class MplCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=12, height=8, dpi=100):
+        plt.style.use('dark_background')
+        self.fig, self.axes = plt.subplots(2, 2, figsize=(width, height), dpi=dpi)
+        self.fig.patch.set_facecolor(COLOR_BG)
+        for ax in self.axes.ravel():
+            ax.set_facecolor(COLOR_CARD)
+            ax.spines['bottom'].set_color('#585B70')
+            ax.spines['top'].set_color('#585B70')
+            ax.tick_params(colors=COLOR_TEXT)
+        super(MplCanvas, self).__init__(self.fig)
+
+
+class FuzzyTipApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+          
+        #초기 데이터 구조 및 규칙
+        self.params = {
+            'svc': {'Poor': [0, 0, 5], 'Good': [2, 5, 8], 'Excellent': [5, 10, 10]},
+            'fd': {'Rancid': [0, 0, 6], 'Delicious': [4, 10, 10]},
+            'tip': {'Cheap': [0, 5, 10], 'Average': [10, 15, 20], 'Generous': [20, 25, 30]}
+        }
+        self.rules_matrix = {
+            ('Poor', 'Rancid'): 'Cheap', ('Poor', 'Delicious'): 'Average',
+            ('Good', 'Rancid'): 'Cheap', ('Good', 'Delicious'): 'Average',
+            ('Excellent', 'Rancid'): 'Average', ('Excellent', 'Delicious'): 'Generous'
+        }
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("FUZZY MASTER - Pro Edition")
+        self.setWindowIcon(QIcon('icon.ico'))
+
+        self.setGeometry(50, 50, 1400, 950)
+        self.setStyleSheet(f"QMainWindow {{ background-color: {COLOR_BG}; }}")
+
+        self.tabs = QTabWidget()
+          
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 1px solid #45475A; background: {COLOR_BG}; }}
+            QTabBar::tab {{
+                background: {COLOR_CARD}; color: {COLOR_TEXT}; 
+                min-width: 120px; padding: 12px 25px; 
+                border-top-left-radius: 8px; border-top-right-radius: 8px;
+                margin-right: 4px;
+            }}
+            QTabBar::tab:hover {{ background: #313244; }}
+            QTabBar::tab:selected {{ 
+                background: {COLOR_ACCENT}; color: {COLOR_DARK_TEXT}; 
+                font-weight: bold; 
+            }}
+        """)
+        self.setCentralWidget(self.tabs)
+
+        self.dashboard_tab = QWidget();
+        self.init_dashboard()
+        self.mf_design_tab = QWidget();
+        self.init_mf_design()
+        self.rule_base_tab = QWidget();
+        self.init_rule_base()
+
+        self.tabs.addTab(self.dashboard_tab, "DASHBOARD")
+        self.tabs.addTab(self.mf_design_tab, "MF DESIGN")
+        self.tabs.addTab(self.rule_base_tab, "RULE BASE")
+
+    def init_dashboard(self):
+        layout = QVBoxLayout(self.dashboard_tab)
+
+        # 메인 결과
+        res_frame = QFrame()
+        res_frame.setStyleSheet(f"background-color: {COLOR_CARD}; border-radius: 15px; border: 1px solid #45475A;")
+        res_vbox = QVBoxLayout(res_frame)
+        res_vbox.addWidget(
+            QLabel("INFERENCE RESULT", styleSheet=f"color: {COLOR_ACCENT}; font-size: 14px; font-weight: bold;",
+                   alignment=Qt.AlignCenter))
+        self.res_label = QLabel("00.00%")
+        self.res_label.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 55px; font-weight: 900; margin: 5px;")
+        self.res_label.setAlignment(Qt.AlignCenter)
+        res_vbox.addWidget(self.res_label)
+        layout.addWidget(res_frame)
+
+        # 입력 컨트롤 바
+        ctrl_card = QFrame()
+        ctrl_card.setStyleSheet(f"background-color: {COLOR_CARD}; border-radius: 10px; padding: 10px;")
+        ctrl_layout = QHBoxLayout(ctrl_card)
+
+        spin_style = f"background: {COLOR_BG}; color: {COLOR_TEXT}; border: 1px solid #45475A; padding: 5px; border-radius: 4px;"
+
+        ctrl_layout.addWidget(QLabel("Service Qual.", styleSheet=f"color: {COLOR_TEXT}; font-weight: bold;"))
+        self.s_in = QDoubleSpinBox();
+        self.s_in.setRange(0, 10);
+        self.s_in.setValue(5.0);
+        self.s_in.setStyleSheet(spin_style)
+        ctrl_layout.addWidget(self.s_in)
+
+        ctrl_layout.addSpacing(20)
+        ctrl_layout.addWidget(QLabel("Food Qual.", styleSheet=f"color: {COLOR_TEXT}; font-weight: bold;"))
+        self.f_in = QDoubleSpinBox();
+        self.f_in.setRange(0, 10);
+        self.f_in.setValue(5.0);
+        self.f_in.setStyleSheet(spin_style)
+        ctrl_layout.addWidget(self.f_in)
+
+        #실시간 값 표기
+        self.side_val_label = QLabel("Tip Value: ( - ) %")
+        self.side_val_label.setStyleSheet(
+            f"color: {COLOR_ACCENT}; font-weight: bold; font-size: 14px; margin-left: 15px;")
+        ctrl_layout.addWidget(self.side_val_label)
+
+        ctrl_layout.addStretch()
+        run_btn = QPushButton("RUN INFERENCE")
+        run_btn.clicked.connect(self.update_plot)
+        run_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {COLOR_SUCCESS}; color: {COLOR_DARK_TEXT}; font-weight: 900; border-radius: 6px; padding: 10px 25px; }} QPushButton:hover {{ background-color: #94E2D5; }}")
+        ctrl_layout.addWidget(run_btn)
+        layout.addWidget(ctrl_card)
+
+        #그래프 영역
+        self.canvas = MplCanvas(self);
+        layout.addWidget(self.canvas)
+
+        footer_layout = QHBoxLayout()
+        footer_layout.addStretch(1)
+        made_by_label = QLabel("Made by DMU. Dept. of Autumation SJ.CHO")
+        made_by_label.setStyleSheet(
+            f"color: {COLOR_TEXT}; font-size: 11px; font-weight: bold; font-style: italic; opacity: 0.6; padding-right: 10px; padding-bottom: 5px;")
+        footer_layout.addWidget(made_by_label)
+        layout.addLayout(footer_layout)
+
+    def init_mf_design(self):
+        layout = QVBoxLayout(self.mf_design_tab)
+        scroll = QScrollArea();
+        scroll.setWidgetResizable(True);
+        container = QWidget();
+        c_layout = QVBoxLayout(container)
+        container.setStyleSheet(f"background-color: {COLOR_BG};")
+        self.mf_inputs = {}
+        for domain, sets in self.params.items():
+            group = QGroupBox(f"{domain.upper()} DEFINITIONS")
+            group.setStyleSheet(
+                f"QGroupBox {{ color: {COLOR_ACCENT}; font-weight: bold; border: 1px solid #45475A; margin-top: 20px; padding-top: 15px; }}")
+            g_layout = QGridLayout()
+            for i, (name, val) in enumerate(sets.items()):
+                g_layout.addWidget(QLabel(f"{name}:", styleSheet=f"color: {COLOR_TEXT};"), i, 0)
+                inputs = []
+                for j, v in enumerate(val):
+                    sb = QDoubleSpinBox();
+                    sb.setRange(0, 30);
+                    sb.setValue(v);
+                    inputs.append(sb)
+                    sb.setStyleSheet(f"background: {COLOR_CARD}; color: {COLOR_TEXT}; border: 1px solid #45475A;")
+                    g_layout.addWidget(sb, i, j + 1)
+                self.mf_inputs[f"{domain}_{name}"] = inputs
+            group.setLayout(g_layout);
+            c_layout.addWidget(group)
+        apply_btn = QPushButton("APPLY MF PARAMETERS");
+        apply_btn.clicked.connect(self.apply_mf_settings)
+        apply_btn.setStyleSheet(
+            f"background-color: {COLOR_ACCENT}; color: {COLOR_DARK_TEXT}; font-weight: bold; height: 40px;")
+        layout.addWidget(scroll);
+        scroll.setWidget(container);
+        layout.addWidget(apply_btn)
+
+    def init_rule_base(self):
+        layout = QVBoxLayout(self.rule_base_tab)
+        group = QGroupBox("RULE BASE MATRIX")
+        group.setStyleSheet(
+            f"QGroupBox {{ color: {COLOR_ACCENT}; font-weight: bold; border: 1px solid #45475A; margin-top: 20px; }}")
+        grid = QGridLayout();
+        self.rule_combos = {};
+        row = 0
+        for s_label in self.params['svc'].keys():
+            for f_label in self.params['fd'].keys():
+                lbl = QLabel(f"IF Service is {s_label} AND Food is {f_label} THEN:", styleSheet=f"color: {COLOR_TEXT};")
+                grid.addWidget(lbl, row, 0)
+                cb = QComboBox();
+                cb.addItems(list(self.params['tip'].keys()))
+                cb.setCurrentText(self.rules_matrix[(s_label, f_label)])
+                cb.setStyleSheet(
+                    f"background: {COLOR_CARD}; color: {COLOR_TEXT}; border: 1px solid #45475A; padding: 5px;")
+                grid.addWidget(cb, row, 1);
+                self.rule_combos[(s_label, f_label)] = cb;
+                row += 1
+        group.setLayout(grid);
+        layout.addWidget(group)
+        apply_rule_btn = QPushButton("UPDATE RULE LOGIC");
+        apply_rule_btn.clicked.connect(self.apply_rule_settings)
+        apply_rule_btn.setStyleSheet(
+            f"background-color: {COLOR_ACCENT}; color: {COLOR_DARK_TEXT}; font-weight: bold; height: 40px;")
+        layout.addWidget(apply_rule_btn);
+        layout.addStretch()
+
+    def apply_mf_settings(self):
+        for key, inputs in self.mf_inputs.items():
+            domain, name = key.split('_');
+            self.params[domain][name] = [i.value() for i in inputs]
+        print("Master, MF Parameters updated.")
+
+    def apply_rule_settings(self):
+        for key, cb in self.rule_combos.items(): self.rules_matrix[key] = cb.currentText()
+        print("Master, Rule Base updated.")
+
+    def update_plot(self):
+        s_v, f_v = self.s_in.value(), self.f_in.value()
+        x_svc = np.arange(0, 10.1, 0.1)
+        x_fd = np.arange(0, 10.1, 0.1)
+        x_tip = np.arange(0, 30.1, 0.1)
+
+        mfs = {d: {n: fuzz.trimf(np.arange(0, 10.1 if d != 'tip' else 30.1, 0.1), v) for n, v in s.items()} for d, s in
+               self.params.items()}
+        svc_lv = {n: fuzz.interp_membership(x_svc, mfs['svc'][n], s_v) for n in self.params['svc'].keys()}
+        fd_lv = {n: fuzz.interp_membership(x_fd, mfs['fd'][n], f_v) for n in self.params['fd'].keys()}
+
+        active_tips = []
+        for (s_label, f_label), t_label in self.rules_matrix.items():
+            weight = np.fmin(svc_lv[s_label], fd_lv[f_label])
+            active_tips.append(np.fmin(weight, mfs['tip'][t_label]))
+
+        aggregated = np.fmax.reduce(active_tips)
+        res = fuzz.defuzz(x_tip, aggregated, 'centroid') if np.sum(aggregated) > 0 else 0
+
+        #결과 인터페이스 업데이트
+        self.res_label.setText(f"{res:.2f}%")
+        self.side_val_label.setText(f"Tip Value: ( {res:.2f} ) %")
+
+        #그래프 시각화
+        for ax in self.canvas.axes.ravel(): ax.clear(); ax.grid(color='#45475A', alpha=0.3)
+        colors = ['#F38BA8', '#A6E3A1', '#89B4FA']
+
+        for i, (n, v) in enumerate(mfs['svc'].items()): self.canvas.axes[0, 0].plot(x_svc, v, color=colors[i], label=n)
+        self.canvas.axes[0, 0].axvline(s_v, color=COLOR_TEXT, ls='--', alpha=0.5);
+        self.canvas.axes[0, 0].set_title("SERVICE ANALYSIS", color=COLOR_ACCENT)
+
+        for i, (n, v) in enumerate(mfs['fd'].items()): self.canvas.axes[1, 0].plot(x_fd, v,
+                                                                                   color=colors[i + 1 if i < 1 else 0],
+                                                                                   label=n)
+        self.canvas.axes[1, 0].axvline(f_v, color=COLOR_TEXT, ls='--', alpha=0.5);
+        self.canvas.axes[1, 0].set_title("FOOD ANALYSIS", color=COLOR_ACCENT)
+
+        for act in active_tips: self.canvas.axes[0, 1].fill_between(x_tip, 0, act, color=COLOR_ACCENT, alpha=0.15)
+        self.canvas.axes[0, 1].set_title("RULE ACTIVATION", color=COLOR_ACCENT)
+
+        self.canvas.axes[1, 1].fill_between(x_tip, 0, aggregated, color=COLOR_ACCENT, alpha=0.4)
+        self.canvas.axes[1, 1].plot(x_tip, aggregated, color=COLOR_ACCENT, lw=2)
+        self.canvas.axes[1, 1].axvline(res, color=COLOR_SUCCESS, lw=4);
+        self.canvas.axes[1, 1].set_title("FINAL TIP VALUE", color=COLOR_ACCENT)
+
+        self.canvas.fig.tight_layout();
+        self.canvas.draw()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    ex = FuzzyTipApp()
+    ex.show()
+    sys.exit(app.exec_())

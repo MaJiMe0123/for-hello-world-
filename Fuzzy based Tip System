@@ -1,3 +1,4 @@
+#for PYQY GUI
 import sys
 import numpy as np
 import skfuzzy as fuzz
